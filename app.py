@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import math
 import tempfile
@@ -15,6 +15,8 @@ from src.config import MOCK_MODE
 from src.screenplay import load_screenplay
 from src.visuals import load_image
 from src.scene_motion import build_motion_matrices
+from src.trailer_renderer import render_all_scenes
+from src.compositor import compose_trailer
 
 
 # ============================================================
@@ -44,7 +46,7 @@ AUDIO_SAMPLE_RATE = 44_100
 
 st.set_page_config(
     page_title="YESNO LXNORO AI Studio",
-    page_icon="Ã°Å¸Å½Â¬",
+    page_icon="🎬",
     layout="wide",
 )
 
@@ -434,6 +436,31 @@ def validate_local_screenplay() -> None:
 
 
 # ============================================================
+# Auto-composite builder for cloud/ephemeral runtimes
+# ============================================================
+
+def ensure_test_composite() -> Path:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if VIDEO_PATH.is_file():
+        return VIDEO_PATH
+
+    scenes_output_dir = OUTPUT_DIR / "scenes"
+    scenes_output_dir.mkdir(parents=True, exist_ok=True)
+    assets_dir = PROJECT_ROOT / "assets" / "scenes"
+
+    if all((assets_dir / f"scene_{i:02d}.png").is_file() for i in range(1, 7)):
+        try:
+            render_all_scenes(assets_dir, scenes_output_dir, fps=OUTPUT_FPS)
+            compose_trailer(scenes_output_dir, VIDEO_PATH)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to auto-render visual composite: {exc}") from exc
+    else:
+        raise FileNotFoundError(f"Required scene assets under {assets_dir} are missing.")
+
+    return VIDEO_PATH
+
+
+# ============================================================
 # Future cloud boundary
 # ============================================================
 
@@ -471,7 +498,6 @@ def process_prompt(prompt: str) -> None:
 
 
 # ============================================================
-# ============================================================
 # YESNO LXNORO AI Studio — Professional UI
 # ============================================================
 
@@ -481,12 +507,12 @@ if "yesno_dark_mode" not in st.session_state:
 theme_dark, theme_light = st.columns(2)
 
 with theme_dark:
-    if st.button("DARK MODE", key="yesno_dark_button"):
+    if st.button("DARK MODE", key="yesno_dark_button", type="primary" if st.session_state.yesno_dark_mode else "secondary"):
         st.session_state.yesno_dark_mode = True
         st.rerun()
 
 with theme_light:
-    if st.button("LIGHT MODE", key="yesno_light_button"):
+    if st.button("LIGHT MODE", key="yesno_light_button", type="primary" if not st.session_state.yesno_dark_mode else "secondary"):
         st.session_state.yesno_dark_mode = False
         st.rerun()
 
@@ -622,7 +648,7 @@ with left:
 
         ai_area=st.container(border=True,key="yesno_ai_response")
         with ai_area:
-            pass
+            st.write("Ready. Enter a prompt below to generate and process your cinematic trailer.")
 
         st.markdown('<div class="yesno-section-title">YOUR MESSAGE</div>',unsafe_allow_html=True)
 
@@ -645,11 +671,26 @@ with right:
 
         video_player=st.container(key="yesno_video_player")
         with video_player:
-            video_to_display=FINAL_VIDEO_PATH if FINAL_VIDEO_PATH.is_file() else VIDEO_PATH
+            # Ensure test composite exists (auto-builds if missing)
+            try:
+                active_video_path = ensure_test_composite()
+            except Exception as exc:
+                active_video_path = None
+
+            video_to_display = FINAL_VIDEO_PATH if FINAL_VIDEO_PATH.is_file() else (active_video_path if active_video_path and active_video_path.is_file() else VIDEO_PATH)
+            
             if video_to_display.is_file():
                 st.video(str(video_to_display))
+                with open(video_to_display, "rb") as vid_file:
+                    st.download_button(
+                        label="Download Video MP4",
+                        data=vid_file.read(),
+                        file_name=video_to_display.name,
+                        mime="video/mp4",
+                        key="download_preview_video"
+                    )
             else:
-                st.warning(f"The visual composite does not exist yet: {VIDEO_PATH}")
+                st.warning(f"The visual composite does not exist yet and could not be auto-rendered: {VIDEO_PATH}")
 
         st.markdown("""
         <div class="yesno-projects-box">
@@ -660,14 +701,15 @@ with right:
         </div>
         """,unsafe_allow_html=True)
 
-# ============================================================# EXISTING PROCESSING PIPELINE ? PRESERVED
+
+# ============================================================
+# Processing Pipeline
 # ============================================================
 
 if prompt:
-
-
-    with st.chat_message("user"):
-        st.write(prompt)
+    with chat_panel:
+        with st.chat_message("user"):
+            st.write(prompt)
 
     try:
         with st.status(
@@ -679,12 +721,13 @@ if prompt:
             # Step 1/4
             # ------------------------------------------------
             st.write(
-                "Step 1/4 Ã¢â‚¬â€ Normalize Ghibli color profile matrices via NumPy"
+                "Step 1/4 — Normalize Ghibli color profile matrices via NumPy"
             )
 
-            if not VIDEO_PATH.is_file():
+            current_video_path = ensure_test_composite()
+            if not current_video_path.is_file():
                 raise FileNotFoundError(
-                    f"Missing visual composite: {VIDEO_PATH}"
+                    f"Missing visual composite: {current_video_path}"
                 )
 
             test_image_path = (
@@ -705,13 +748,13 @@ if prompt:
                     "Color normalization changed image dimensions"
                 )
 
-            st.write("Ã¢Å“â€œ Local color matrix validation complete")
+            st.write("✓ Local color matrix validation complete")
 
             # ------------------------------------------------
             # Step 2/4
             # ------------------------------------------------
             st.write(
-                "Step 2/4 Ã¢â‚¬â€ Apply -12dB audio ducking via Pydub"
+                "Step 2/4 — Apply -12dB audio ducking via Pydub"
             )
 
             audio_path = build_local_audio(
@@ -724,24 +767,24 @@ if prompt:
                 )
 
             st.write(
-                "Ã¢Å“â€œ Ambient + dialogue stereo mix generated"
+                "✓ Ambient + dialogue stereo mix generated"
             )
             st.write(
-                "Ã¢Å“â€œ Voice-band activity detection validated"
+                "✓ Voice-band activity detection validated"
             )
             st.write(
-                "Ã¢Å“â€œ Background ducking fixed at -12 dB"
+                "✓ Background ducking fixed at -12 dB"
             )
 
             # ------------------------------------------------
             # Step 3/4
             # ------------------------------------------------
             st.write(
-                "Step 3/4 Ã¢â‚¬â€ Multiplex streams into H.264/AAC MP4"
+                "Step 3/4 — Multiplex streams into H.264/AAC MP4"
             )
 
             mux_video_audio(
-                VIDEO_PATH,
+                current_video_path,
                 audio_path,
                 FINAL_VIDEO_PATH,
             )
@@ -752,14 +795,14 @@ if prompt:
                 )
 
             st.write(
-                "Ã¢Å“â€œ H.264 video + AAC stereo audio created"
+                "✓ H.264 video + AAC stereo audio created"
             )
 
             # ------------------------------------------------
             # Step 4/4
             # ------------------------------------------------
             st.write(
-                "Step 4/4 Ã¢â‚¬â€ Validation/finalization"
+                "Step 4/4 — Validation/finalization"
             )
 
             final_video = VideoFileClip(
@@ -783,10 +826,10 @@ if prompt:
                 )
 
             st.write(
-                f"Ã¢Å“â€œ Final duration: {duration:.2f}s"
+                f"✓ Final duration: {duration:.2f}s"
             )
             st.write(
-                f"Ã¢Å“â€œ Final container FPS: {fps:.2f}"
+                f"✓ Final container FPS: {fps:.2f}"
             )
 
             status.update(
@@ -795,25 +838,21 @@ if prompt:
             )
 
         st.success(
-            "YESNO LXNORO AI Studio Ã¢â‚¬â€ local MOCK pipeline complete."
+            "YESNO LXNORO AI Studio — local MOCK pipeline complete."
         )
 
         if FINAL_VIDEO_PATH.is_file():
             st.video(str(FINAL_VIDEO_PATH))
+            with open(FINAL_VIDEO_PATH, "rb") as final_file:
+                st.download_button(
+                    label="Download Final YESNO Trailer MP4",
+                    data=final_file.read(),
+                    file_name="yesno_final.mp4",
+                    mime="video/mp4",
+                    key="download_final_trailer"
+                )
 
     except Exception as exc:
         st.error(
             f"Processing failed: {exc}"
         )
-
-
-
-
-
-
-
-
-
-
-
-
