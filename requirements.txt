@@ -3,7 +3,7 @@ clean-text
 pydantic
 python-dotenv
 numpy
-opencv-python
+opencv-python-headless
 color-matcher
 scikit-image
 scipy
