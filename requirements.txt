@@ -11,3 +11,4 @@ pydub
 moviepy
 loguru
 Pillow
+audioop-lts; python_version >= "3.13"
